@@ -74,6 +74,7 @@ import { toolHistory } from './utils/toolHistory.js';
 import { handleWelcomePageOnboarding, skipWelcomePageOnboarding } from './utils/welcome-onboarding.js';
 
 import { VERSION } from './version.js';
+import { getKernelAdmittedToolNames, isKernelToolAdmitted } from './kernel/admission.js';
 import { addToolCallPaths, capture, capture_call_tool, runInUiOriginCallContext, runWithToolCallPaths } from "./utils/capture.js";
 import { logToStderr, logger } from './utils/logger.js';
 import {
@@ -1146,7 +1147,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         ];
 
         // Filter tools based on current client
-        const filteredTools = allTools.filter(tool => shouldIncludeTool(tool.name));
+        const kernelAllowed = getKernelAdmittedToolNames();
+        const filteredTools = allTools.filter(tool => shouldIncludeTool(tool.name) && (kernelAllowed === null || kernelAllowed.has(tool.name)));
 
         // logToStderr('debug', `Returning ${filteredTools.length} tools (filtered from ${allTools.length} total) for client: ${currentClient?.name || 'unknown'}`);
 
@@ -1214,6 +1216,12 @@ async function handleCallToolRequest(request: CallToolRequest): Promise<ServerRe
     let isError = false;
 
     try {
+        // Apply the same admission check for remote, local and UI-origin tool calls.
+        // Fail closed before dispatch, configuration changes or process execution.
+        if (!isKernelToolAdmitted(name)) {
+            isError = true;
+            return { content: [{ type: 'text', text: 'KERNEL_MCP_ADMISSION_DENIED' }], isError: true };
+        }
         // telemetryData declared above; extract metadata from _meta field if present
         const metadata = request.params._meta as any;
         // Reset remote attribution for every call so a prior remote call never
